@@ -134,6 +134,11 @@ def split_restarts(ph):
     return out
 
 
+def is_filler(word):
+    t = norm_tokens(word)
+    return bool(t) and all(x in FILLERS for x in t)
+
+
 def contained(a, b):
     """share of tokens of a that appear in b in the same order"""
     if not a:
@@ -258,7 +263,14 @@ def build_edl(ph, db, th, a, fps, dur):
     kept = [p for p in ph if p['keep']]
     ranges = []
     for p in kept:
-        s, e = refine(db, th, p['words'][0]['s'] - 0.08, p['words'][-1]['e'] + 0.06)
+        ws = list(p['words'])
+        # a drawn-out «а…» / «э…» / «ну…» at the edge of a phrase is a hesitation, not a word
+        while len(ws) > 1 and is_filler(ws[0]['w']) and ws[0]['e'] - ws[0]['s'] >= 0.45:
+            ws.pop(0)
+        while len(ws) > 1 and is_filler(ws[-1]['w']) and ws[-1]['e'] - ws[-1]['s'] >= 0.45:
+            ws.pop()
+        p['words_cut'] = ws
+        s, e = refine(db, th, ws[0]['s'] - 0.08, ws[-1]['e'] + 0.06)
         ranges.append([s, min(e, dur), p['id']])
     # a dropped phrase must never leak into a neighbour's padding
     drops = [(p['words'][0]['s'], p['words'][-1]['e']) for p in ph if not p['keep']]
@@ -278,7 +290,7 @@ def build_edl(ph, db, th, a, fps, dur):
     pieces, blips = [], []
     byid = {p['id']: p for p in ph}
     for s, e, ids in merged:
-        ws = [w for i in ids for w in byid[i]['words']]
+        ws = [w for i in ids for w in byid[i].get('words_cut', byid[i]['words'])]
         for ps, pe in split_pauses(db, th, s, e, a.pause, a.keep_before, a.keep_after, 0.45, blips, ws):
             pieces.append([ps, pe, ids])
     build_edl.blips = blips
@@ -418,7 +430,8 @@ def main():
     os.makedirs(os.path.dirname(os.path.abspath(a.output)), exist_ok=True)
     print(f'[1/5] audio · {fmt(dur)}', flush=True)
     a16 = load_pcm(a.input, SR_A)[:, 0]
-    db = envelope(a16)
+    # cut points are found on the cleanest audio we have: after denoise the pauses are real silence
+    db = envelope(load_pcm(a.audio, SR_A)[:, 0] if a.audio else a16)
     th = speech_threshold(db)
     if a.plan:
         plan = json.load(open(a.plan))
