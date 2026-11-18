@@ -18,12 +18,14 @@ bash setup.sh --denoise     # optional: AI noise removal (needs Python 3.10/3.11
 - If pip fails with `Permission denied`, a global PYTHONPATH leaks in: `unset PYTHONPATH` (setup.sh does it).
 
 ## Run
+0. **Noisy recording?** (camera mic, street, pool, wind) Denoise first — the cut points are then found on real silence:
+   `.venv-denoise/bin/python denoise.py RAW.mp4 out/clean.wav` and add `--audio out/clean.wav` to every command below.
 1. **Plan first** (fast to review, nothing rendered):
    `.venv/bin/python clean_takes.py RAW.mp4 out/cut.mp4 --plan-only [--lang ru] [--prompt "имена, бренды"]`
    Read `out/cut_report.md`: every phrase with ✅ kept / ❌ dropped + reason. Show the user the dropped ones if anything looks doubtful.
 2. **Fix decisions** if needed: edit `"keep"` in `out/cut_plan.json`, then render with `--plan out/cut_plan.json`.
 3. **Render**: same command without `--plan-only` (or with `--plan …`). Output: `out/cut.mp4` (1080 on the short side, 30 fps, −14 LUFS), `_report.md` with a re-transcription of the result, `_edl.json`.
-4. **Noise** (optional, before step 3): `.venv-denoise/bin/python denoise.py RAW.mp4 out/clean.wav` then add `--audio out/clean.wav` to the render.
+4. **Check** the "Проверка" section of the report (re-transcription of the result) and give the user the file. If they hear a stumble at second N, find the phrase in `_plan.json`, set `"keep": false` (or re-cut) and render again with `--plan`.
 
 ## Speed / heavy files
 - Whisper small on CPU: ~1 min per minute of audio. 4K HEVC from phones/DJI decodes slowly: ~4 s of CPU per 1 s of output at 1080p. Use `--jobs` (parallel pieces) and run in the background if the shell has a time limit.
