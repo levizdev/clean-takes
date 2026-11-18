@@ -1,0 +1,4 @@
+# install torch/torchaudio 2.2.2 CPU first (setup.sh --denoise does it)
+deepfilternet==0.5.6
+soundfile>=0.12
+numpy<2

@@ -1,0 +1,11 @@
+.venv/
+.venv-denoise/
+__pycache__/
+out*/
+*.mp4
+*.mov
+*.MP4
+*.MOV
+*.wav
+*.mp3
+*.m4a
