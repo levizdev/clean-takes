@@ -237,11 +237,14 @@ def split_pauses(db, th, s, e, pause, keep_before, keep_after, min_piece, blips,
     pieces.append([cur, e])
     # a lone "а"/"мм"/breath before or after the phrase, cut off by a pause: < 0.25 s of voice -> drop
     def has_word(p):
+        """does a real (non-filler) word start where this piece's voice starts?"""
+        seg = db[int(p[0] / HOP):int(p[1] / HOP)]
+        on = np.flatnonzero(seg >= th)
+        onset = p[0] + (on[0] * HOP if len(on) else 0.0)
         for w in words:
-            if norm_tokens(w['w']) and all(t in FILLERS for t in norm_tokens(w['w'])):
+            if is_filler(w['w']):
                 continue
-            mid = (w['s'] + w['e']) / 2
-            if p[0] <= mid <= p[1] or (p[0] <= w['s'] <= p[1] and w['e'] - w['s'] < 0.8):
+            if abs(w['s'] - onset) <= 0.15 or p[0] <= (w['s'] + w['e']) / 2 <= p[1]:
                 return True
         return False
     while len(pieces) > 1 and voiced(db, th, *pieces[0]) < 0.45 and not has_word(pieces[0]):
@@ -451,6 +454,9 @@ def main():
     print(f'[3/5] phrases: {len(ph)} · kept {sum(p["keep"] for p in ph)} · dropped {sum(not p["keep"] for p in ph)}', flush=True)
     edl = build_edl(ph, db, th, a, a.fps, dur)
     json.dump(edl, open(base + '_edl.json', 'w'), indent=1)
+    if not edl:
+        write_report(base + '_report.md', a, ph, edl, th, dur, None, None)
+        sys.exit('no clean speech found - nothing to cut (see the report)')
     if a.plan_only:
         write_report(base + '_report.md', a, ph, edl, th, dur, None, None)
         print(f'plan only → {base}_report.md  (edit {base}_plan.json, then rerun with --plan)')
