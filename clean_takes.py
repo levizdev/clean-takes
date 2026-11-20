@@ -64,17 +64,50 @@ def norm_tokens(text):
 
 
 # ----------------------------------------------------------------------------- ASR
-def transcribe(a16, lang, model_name, prompt=None, threads=0):
-    from faster_whisper import WhisperModel
-    m = WhisperModel(model_name, device='cpu', compute_type='int8', cpu_threads=threads)
-    segs, _ = m.transcribe(a16, language=None if lang == 'auto' else lang, word_timestamps=True, beam_size=5,
+_MODELS = {}
+
+
+def _model(name, threads=0):
+    if name not in _MODELS:
+        from faster_whisper import WhisperModel
+        _MODELS[name] = WhisperModel(name, device='cpu', compute_type='int8', cpu_threads=threads)
+    return _MODELS[name]
+
+
+def _words(m, audio, t0, lang, prompt):
+    segs, _ = m.transcribe(audio, language=None if lang == 'auto' else lang, word_timestamps=True, beam_size=5,
                            condition_on_previous_text=False, vad_filter=False, initial_prompt=prompt)
-    words = []
+    out = []
     for s in segs:
         for w in (s.words or []):
             if w.word.strip():
-                words.append({'s': float(w.start), 'e': float(w.end), 'w': w.word.strip(), 'p': round(float(w.probability), 3)})
-    return words
+                out.append({'s': t0 + float(w.start), 'e': t0 + float(w.end), 'w': w.word.strip(), 'p': round(float(w.probability), 3)})
+    return out
+
+
+def transcribe(a16, lang, model_name, prompt=None, threads=0, db=None, th=None):
+    """Whisper on the whole file, then a second look at every stretch where the envelope shows voice
+    but Whisper returned no words: on long retake-heavy recordings it silently skips 5-15 s chunks."""
+    m = _model(model_name, threads)
+    words = _words(m, a16, 0.0, lang, prompt)
+    if db is None:
+        return words
+    dur = len(a16) / SR_A
+    holes, prev = [], 0.0
+    for w in words:
+        holes.append((prev, w['s']))
+        prev = max(prev, w['e'])
+    holes.append((prev, dur))
+    extra = []
+    for s, e in holes:
+        if e - s < 1.5 or voiced(db, th, s, e) < 0.6:
+            continue
+        ws, we = max(0.0, s - 0.3), min(dur, e + 0.3)
+        got = [w for w in _words(m, a16[int(ws * SR_A):int(we * SR_A)], ws, lang, prompt) if w['s'] >= s - 0.05 and w['e'] <= e + 0.05]
+        if got:
+            print(f'      +{len(got)} words Whisper skipped at {fmt(s)}–{fmt(e)}', flush=True)
+        extra += got
+    return sorted(words + extra, key=lambda w: w['s'])
 
 
 # ----------------------------------------------------------------------------- phrases & retakes
@@ -444,7 +477,7 @@ def main():
     else:
         print(f'[2/5] whisper {a.model} ({a.lang}) …', flush=True)
         t0 = time.time()
-        words = transcribe(a16, a.lang, a.model, a.prompt)
+        words = transcribe(a16, a.lang, a.model, a.prompt, db=db, th=th)
         print(f'      {len(words)} words in {time.time() - t0:.0f}s', flush=True)
         ph = mark_retakes(split_restarts(to_phrases(words, a.gap)), a.window)
         json.dump({'input': os.path.abspath(a.input), 'phrases': [{k: p[k] for k in ('id', 's', 'e', 'text', 'p', 'keep', 'why', 'words')} for p in ph]},
