@@ -451,7 +451,7 @@ def main():
     ap.add_argument('input'); ap.add_argument('output')
     ap.add_argument('--lang', default='ru', help='language code or auto (default ru)')
     ap.add_argument('--model', default='small', help='faster-whisper model: small (default), medium, large-v3')
-    ap.add_argument('--prompt', default=None, help='hint words for Whisper: names, brands, slang')
+    ap.add_argument('--prompt', default=None, help='hint words for Whisper. Careful: on some recordings a prompt makes Whisper skip whole stretches; check the report')
     ap.add_argument('--gap', type=float, default=0.45, help='pause that ends a phrase, s')
     ap.add_argument('--window', type=float, default=20.0, help='how far ahead a retake is searched, s')
     ap.add_argument('--pause', type=float, default=0.30, help='cut pauses longer than this inside phrases, s')

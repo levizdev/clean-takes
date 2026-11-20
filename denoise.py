@@ -6,8 +6,9 @@
 Then cut with the clean audio:  python clean_takes.py RAW.mp4 OUT.mp4 --audio OUT.wav
 
 - Runs on CPU, ~5 s per minute of audio after the model is downloaded (from GitHub, ~10 MB).
-- The file is processed in 8 s chunks with overlap: on long files DeepFilterNet sometimes
-  collapses into silence after ~25 s; chunking avoids that.
+- The file is processed in 8 s chunks, each with 2 s of warm-up before and 1 s after that are
+  discarded: on long files DeepFilterNet sometimes collapses into silence after ~25 s, and right
+  after a (re)start it needs ~1 s to settle - without the warm-up it ate quiet words at chunk joints.
 - --atten limits how much noise is removed, in dB. Unlimited removal also eats words when the
   microphone is far (camera mic at 1-2 m, pool/street/wind): 32 dB was the sweet spot on our
   test (noise 19 dB under the voice, words intact). With a lavalier you can go higher (--atten 100).
@@ -49,22 +50,26 @@ def main():
     rms = np.sqrt(np.mean(x[np.abs(x) > 0.003] ** 2) + 1e-12)
     g = min(10 ** (-20 / 20) / rms, 30.0)          # quiet camera audio -> about -20 dBFS before the model
     x = np.clip(x * g, -1, 1)
-    C, O, T = int(a.chunk * sr), int(0.5 * sr), len(x)
+    # chunks [s, e) with a 2 s warm-up before and 1 s after that are thrown away: the model needs
+    # ~1 s to settle and goes soft at the very end of its buffer (that ate words on chunk joints)
+    C, PRE, POST, XF, T = int(a.chunk * sr), int(2.0 * sr), int(1.0 * sr), int(0.25 * sr), len(x)
     y, w = np.zeros(T, np.float32), np.zeros(T, np.float32)
     s = 0
     while s < T:
         e = min(T, s + C)
+        i0, i1 = max(0, s - PRE), min(T, e + XF + POST)
         model, st, _ = init_df(log_level='ERROR', post_filter=True)
-        seg = torch.from_numpy(x[max(0, s - O):e].copy())[None]
-        z = enhance(model, st, seg, atten_lim_db=a.atten).numpy()[0][s - max(0, s - O):]
-        n = len(z); win = np.ones(n, np.float32); f = min(O, n)
+        z = enhance(model, st, torch.from_numpy(x[i0:i1].copy())[None], atten_lim_db=a.atten).numpy()[0]
+        ce = min(T, e + XF)
+        z = z[s - i0:ce - i0]
+        win = np.ones(len(z), np.float32)
         if s > 0:
-            win[:f] = np.linspace(0, 1, f)
-        if e < T:
-            win[-f:] = np.linspace(1, 0, f)
-        y[s:s + n] += z * win; w[s:s + n] += win
+            win[:XF] = np.linspace(0, 1, XF)
+        if ce < T:
+            win[-XF:] = np.linspace(1, 0, XF)
+        y[s:ce] += z * win; w[s:ce] += win
         print(f'\r  {e / T * 100:5.1f}%', end='', flush=True)
-        s = e - O if e < T else T
+        s = e
     print()
     y = y / np.maximum(w, 1e-6)
     with tempfile.TemporaryDirectory() as tmp:
