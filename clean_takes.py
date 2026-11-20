@@ -174,7 +174,7 @@ def mark_retakes(ph, window):
             a, b = p['tok'], q['tok']
             pre, con = prefix_len(a, b), contained(a, b)
             ratio = difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
-            short_false_start = len(a) <= 3 and pre >= 1 and len(b) > len(a)
+            short_false_start = len(a) <= 3 and pre == len(a) and len(b) > len(a)   # whole fragment = start of the next phrase
             if (pre >= 2 and con >= 0.5) or ratio >= 0.6 or con >= 0.8 or short_false_start:
                 p['keep'], p['why'] = False, f'retake:{q["id"]}'
                 break

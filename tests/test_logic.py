@@ -30,6 +30,8 @@ CASES = [
     # normal speech with repeated words must survive
     ('no false alarm', W('Сколько уроков прошёл, сколько раз накосячил, вот вот сгорит серия.') + W('Она давит ровно на то, что тебя цепляет.', 5),
      [True, True]),
+    # list of questions starting with the same word must survive
+    ('enumeration', W('Сколько потратил?') + W('Сколько часов назад смотрел рекламу?', 1.5), [True, True]),
     ('same first word, different sentences', W('Она запоминает твои сети.') + W('Она давит ровно туда, где больно.', 3), [True, True]),
 ]
 
