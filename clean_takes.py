@@ -85,29 +85,46 @@ def _words(m, audio, t0, lang, prompt):
     return out
 
 
-def transcribe(a16, lang, model_name, prompt=None, threads=0, db=None, th=None):
-    """Whisper on the whole file, then a second look at every stretch where the envelope shows voice
-    but Whisper returned no words: on long retake-heavy recordings it silently skips 5-15 s chunks."""
-    m = _model(model_name, threads)
-    words = _words(m, a16, 0.0, lang, prompt)
-    if db is None:
-        return words
-    dur = len(a16) / SR_A
-    holes, prev = [], 0.0
-    for w in words:
-        holes.append((prev, w['s']))
-        prev = max(prev, w['e'])
-    holes.append((prev, dur))
-    extra = []
-    for s, e in holes:
-        if e - s < 1.5 or voiced(db, th, s, e) < 0.6:
+def speech_chunks(db, th, dur, max_len=12.0, min_sil=0.35):
+    """split the recording at pauses into chunks of <= max_len seconds"""
+    q = db < th
+    cuts, run_ = [], 0
+    for i, quiet in enumerate(q):
+        if quiet:
+            run_ += 1
             continue
-        ws, we = max(0.0, s - 0.3), min(dur, e + 0.3)
-        got = [w for w in _words(m, a16[int(ws * SR_A):int(we * SR_A)], ws, lang, prompt) if w['s'] >= s - 0.05 and w['e'] <= e + 0.05]
-        if got:
-            print(f'      +{len(got)} words Whisper skipped at {fmt(s)}–{fmt(e)}', flush=True)
-        extra += got
-    return sorted(words + extra, key=lambda w: w['s'])
+        if run_ * HOP >= min_sil:
+            cuts.append((i - run_ / 2) * HOP)
+        run_ = 0
+    chunks, start, last = [], 0.0, 0.0
+    for c in cuts + [dur]:
+        if c - start > max_len and last > start:
+            chunks.append((start, last)); start = last
+        last = c
+    chunks.append((start, dur))
+    out = []
+    for s, e in chunks:            # a chunk longer than max_len without pauses: hard split
+        while e - s > max_len * 1.5:
+            out.append((s, s + max_len)); s += max_len
+        out.append((s, e))
+    return out
+
+
+def transcribe(a16, lang, model_name, prompt=None, threads=0, db=None, th=None):
+    """Whisper chunk by chunk (chunks end in pauses). One pass over a long retake-heavy recording
+    silently skips 5-15 s stretches and glues different takes together; short chunks don't."""
+    m = _model(model_name, threads)
+    if db is None:
+        return _words(m, a16, 0.0, lang, prompt)
+    dur = len(a16) / SR_A
+    words = []
+    chunks = [c for c in speech_chunks(db, th, dur) if voiced(db, th, *c) >= 0.15]
+    for k, (s, e) in enumerate(chunks):
+        ws = [w for w in _words(m, a16[int(s * SR_A):int(e * SR_A)], s, lang, prompt) if w['s'] < e]
+        words += ws
+        print(f'\r      chunk {k + 1}/{len(chunks)}', end='', flush=True)
+    print()
+    return sorted(words, key=lambda w: w['s'])
 
 
 # ----------------------------------------------------------------------------- phrases & retakes
